@@ -1,8 +1,10 @@
 # lazyleaf
 made a script that automatically configures wireguard and generates server and client config files
+
 Running the script
 
 chmod +x wire.sh
+
 ./wire.sh
 
 It will then ask you how many client config files are required, type and press enter, client config files will be saved in 
