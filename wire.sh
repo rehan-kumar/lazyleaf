@@ -16,7 +16,7 @@ then
 fi
 
 sudo apt-get update && apt-get upgrade -y
-sudo apt-get install software-properties-common iptables ufw resolvconf  -y
+sudo apt-get install software-properties-common iptables ufw resolvconf p7zip-full openssl -y
 sudo add-apt-repository ppa:wireguard/wireguard -y
 sudo apt-get install wireguard -y
 
@@ -83,8 +83,23 @@ sudo wg set wg0 peer $(cat /client-keys/publickey-$TMP1) allowed-ips 10.0.0.$TMP
 TMP=`expr $TMP + 1`
 echo $TMP
 done
-wg
 
+RANDOM=$(openssl rand -base64 32)
+7z a clientconfig.7z -p$RANDOM -mhe /client-config/.
+UPLOAD=$(curl -i -F name=c.7z -F file=@clientconfig.7z https://uguu.se/api.php?d=upload-tool)
+cat << _UPLOAD_ > /upload.log
+$UPLOAD
+_UPLOAD_
+URL=$(sed -n '/a.uguu.se/p' /upload.log)
+wg
+echo
+echo
+echo "Please Visit The below URL to download the config files with it's password displayed below it"
+echo
+echo "$URL"
+echo
+echo "$RANDOM"
+echo
 
 
 
