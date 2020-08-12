@@ -16,7 +16,7 @@ then
 fi
 
 sudo apt-get update && apt-get upgrade -y
-sudo apt-get install software-properties-common iptables ufw resolvconf p7zip-full openssl -y
+sudo apt-get install software-properties-common iptables ufw resolvconf p7zip-full openssl  -y
 sudo add-apt-repository ppa:wireguard/wireguard -y
 sudo apt-get install wireguard -y
 
@@ -43,12 +43,9 @@ sudo sysctl -p
 sudo ufw allow 22/tcp 
 sed -i -e '/DEFAULT_FORWARD_POLICY/c DEFAULT_FORWARD_POLICY="ACCEPT" ' /etc/default/ufw
 cat << fire >> /etc/ufw/before.rules
-
 *nat
 :POSTROUTING ACCEPT [0:0]
 -A POSTROUTING -o eth0 -j MASQUERADE
-
-
 COMMIT
 fire
 sudo ufw enable -y
@@ -72,12 +69,22 @@ cat << _CLIENT_ > /client-config/$TMP1.conf
 PrivateKey = $(cat /client-keys/privatekey-$TMP1)
 Address = 10.0.0.$TMP/32, fd86:ea04:1115::$TMP/128
 DNS = 1.1.1.1
-
 [Peer]
 PublicKey = $PUBLICKEY
 AllowedIPs = 0.0.0.0/0, ::/0
 Endpoint = $IPV4:51820
 _CLIENT_
+cat << _CLIENTNEW_ > /client-config/$TMP1-ipv6.conf
+[Interface]
+PrivateKey = $(cat /client-keys/privatekey-$TMP1)
+Address = 10.0.0.$TMP/32, fd86:ea04:1115::$TMP/128
+DNS = 1.1.1.1
+[Peer]
+PublicKey = $PUBLICKEY
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = [$IPV6]:51820
+_CLIENTNEW_
+
 sudo wg set wg0 peer $(cat /client-keys/publickey-$TMP1) allowed-ips 10.0.0.$TMP/32,fd86:ea04:1115::$TMP/128
 
 TMP=`expr $TMP + 1`
@@ -91,6 +98,7 @@ cat << _UPLOAD_ > /upload.log
 $UPLOAD
 _UPLOAD_
 URL=$(sed -n '/a.uguu.se/p' /upload.log)
+echo
 wg
 echo
 echo
@@ -100,6 +108,3 @@ echo "$URL"
 echo
 echo "$RANDOM"
 echo
-
-
-
