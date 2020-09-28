@@ -1,22 +1,66 @@
 #!/bin/sh
+
+portfrd () {
+PRT=0
+YESNO="n"
+echo
+echo "Would you want to setup/enable Port forwarding y/n."
+read YESNO
+if [ "$YESNO" = "y" ] || [ "$YESNO" = "Y" ]
+then
+echo "Would you like to port forward UPD or TCP?"
+read PROTOCOL
+if [ "$PROTOCOL" = "tcp" ] || [ "$PROTOCOL" = "TCP" ]
+then
+while ! [ "$PRT" = "exit" ] && ! [ "$PRT" = "EXIT" ]
+do
+echo "Enter which TCP port to forward and press enter, when done, type exit and press enter "
+read PRT
+if [ "$PRT" = "exit" ] || [ "$PRT" = "EXIT" ]
+then
+break
+fi
+sudo iptables -A FORWARD -i eth0 -o wg0 -p tcp --syn --dport $PRT -m conntrack --ctstate NEW -j ACCEPT
+sudo iptables -A FORWARD -i eth0 -o wg0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -A FORWARD -i wg0 -o eth0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport "$PRT" -j DNAT --to-destination 10.0.0.2
+sudo iptables -t nat -A POSTROUTING -o wg0 -p tcp --dport "$PRT" -d 10.0.0.2 -j SNAT --to-source 10.0.0.1
+sudo netfilter-persistent save
+echo
+done
+fi
+if [ "$PROTOCOL" = "udp" ] || [ "$PROTOCOL" = "UDP" ]
+then
+while ! [ "$PRT" = "exit" ] && ! [ "$PRT" = "EXIT" ]
+do
+echo "Enter which UDP port to forward and press enter, when done, type exit and press enter "
+read PRT
+if [ "$PRT" = "exit" ] || [ "$PRT" = "EXIT" ]
+then
+break
+fi
+sudo iptables -A FORWARD -i eth0 -o wg0 -p udp --dport $PRT -m conntrack --ctstate NEW -j ACCEPT
+sudo iptables -A FORWARD -i eth0 -o wg0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -A FORWARD -i wg0 -o eth0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -t nat -A PREROUTING -i eth0 -p udp --dport "$PRT" -j DNAT --to-destination 10.0.0.2
+sudo iptables -t nat -A POSTROUTING -o wg0 -p udp --dport "$PRT" -d 10.0.0.2 -j SNAT --to-source 10.0.0.1
+sudo netfilter-persistent save
+echo
+done
+fi
+fi
+}
+
+FILE=/etc/wireguard/wg0.conf
+if [ -f "$FILE" ]
+then
+echo "It seems wireguard is already configured."
+portfrd
+else
 IPV4=$(curl -4 icanhazip.com)
 IPV6=$(curl -6 icanhazip.com)
-
-echo "Enter number of Wireguard clients: "
-read CLIENTS
-
-if ! [ "$CLIENTS" -gt 0 ]  && ! [ "$CLIENTS" =~ ^[0-9]+$ ] && ! [ "$CLIENTS" -lt 101 ]
-then
-  echo "Enter a valid integer from 1 to 100."
-  read CLIENTS
-fi
-if ! [ "$CLIENTS" -gt 0 ]  && ! [ "$CLIENTS" =~ ^[0-9]+$ ] && ! [ "$CLIENTS" -lt 101 ]
-then
-  CLIENTS=1
-fi
-
 sudo apt-get update && apt-get upgrade -y
-sudo apt-get install software-properties-common iptables ufw resolvconf p7zip-full openssl  -y
+sudo apt-get install software-properties-common iptables ufw resolvconf p7zip-full openssl iptables-persistent  -y
 sudo add-apt-repository ppa:wireguard/wireguard -y
 sudo apt-get install wireguard -y
 
@@ -42,54 +86,46 @@ sed -i -e '/net.ipv6.conf.all.forwarding/c net.ipv6.conf.all.forwarding=1 ' /etc
 sudo sysctl -p
 sudo ufw allow 22/tcp 
 sed -i -e '/DEFAULT_FORWARD_POLICY/c DEFAULT_FORWARD_POLICY="ACCEPT" ' /etc/default/ufw
+
 cat << fire >> /etc/ufw/before.rules
 *nat
 :POSTROUTING ACCEPT [0:0]
 -A POSTROUTING -o eth0 -j MASQUERADE
 COMMIT
 fire
-sudo ufw enable -y
+sudo ufw --force enable
 sudo systemctl restart ufw
 sudo ufw allow 51820/udp
-sudo ufw allow 21/tcp 
 wg-quick up wg0
 sudo systemctl enable wg-quick@wg0
 mkdir /client-config
 mkdir /client-keys
 
-TMP=2
-while [ "$TMP" -lt `expr $CLIENTS + 2` ]
-do
-TMP1=`expr $TMP - 1`
 umask 077
-wg genkey > /client-keys/privatekey-$TMP1
-wg pubkey < /client-keys/privatekey-$TMP1 > /client-keys/publickey-$TMP1
-cat << _CLIENT_ > /client-config/$TMP1.conf
+wg genkey > /client-keys/privatekey
+wg pubkey < /client-keys/privatekey > /client-keys/publickey
+cat << _CLIENT_ > /client-config/client.conf
 [Interface]
-PrivateKey = $(cat /client-keys/privatekey-$TMP1)
-Address = 10.0.0.$TMP/32, fd86:ea04:1115::$TMP/128
+PrivateKey = $(cat /client-keys/privatekey)
+Address = 10.0.0.2/32, fd86:ea04:1115::2/128
 DNS = 1.1.1.1
 [Peer]
 PublicKey = $PUBLICKEY
 AllowedIPs = 0.0.0.0/0, ::/0
 Endpoint = $IPV4:51820
 _CLIENT_
-cat << _CLIENTNEW_ > /client-config/$TMP1-ipv6.conf
-[Interface]
-PrivateKey = $(cat /client-keys/privatekey-$TMP1)
-Address = 10.0.0.$TMP/32, fd86:ea04:1115::$TMP/128
-DNS = 1.1.1.1
+
+sudo wg set wg0 peer $(cat /client-keys/publickey) allowed-ips 10.0.0.2/32,fd86:ea04:1115::2/128
+cat << _SAVE_ >> /etc/wireguard/wg0.conf
+
 [Peer]
-PublicKey = $PUBLICKEY
-AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = [$IPV6]:51820
-_CLIENTNEW_
+PublicKey = $(cat /client-keys/publickey)
+AllowedIPs = 10.0.0.2/32, fd86:ea04:1115::2/128
+_SAVE_
 
-sudo wg set wg0 peer $(cat /client-keys/publickey-$TMP1) allowed-ips 10.0.0.$TMP/32,fd86:ea04:1115::$TMP/128
-
-TMP=`expr $TMP + 1`
-echo $TMP
-done
+sudo netfilter-persistent save
+echo
+portfrd
 
 RANDOM=$(openssl rand -base64 32)
 7z a clientconfig.7z -p$RANDOM -mhe /client-config/.
@@ -108,3 +144,4 @@ echo "$URL"
 echo
 echo "$RANDOM"
 echo
+fi
